@@ -31,6 +31,7 @@ export function Reel({
   dim,
   anticipate,
   reduced,
+  hold,
   onDone,
 }: {
   strip: Sym[];
@@ -41,6 +42,7 @@ export function Reel({
   dim: boolean;
   anticipate: boolean;
   reduced: boolean;
+  hold?: boolean;
   onDone: (id: number) => void;
 }) {
   const stripRef = useRef<HTMLDivElement>(null);
@@ -106,6 +108,20 @@ export function Reel({
   }, [run, stop, strip]);
 
   const shown = view.slice(0, spinning ? 4 : 3);
+
+  if (hold) {
+    return (
+      <div className="reel locked">
+        <div className="strip" style={{ height: cell * 3 }}>
+          {[0, 1, 2].map((row) => (
+            <div key={row} className="cell win" style={{ height: cell || undefined }}>
+              <SymbolFace sym="wild" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`reel ${anticipate && spinning ? "anticipate" : ""} ${landed ? "landed" : ""}`}>

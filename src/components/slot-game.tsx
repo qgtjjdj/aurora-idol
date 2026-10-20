@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Info, Minus, Plus, Volume2, VolumeX, Zap } from "lucide-react";
 import { ParticleField } from "@/components/particle-field";
 import { Reel, type ReelRun } from "@/components/reel";
-import { IDOLS, SYMBOL_ART, SYMBOL_NAME, idolFor, money, type Idol } from "@/game/content";
+import { GIFTS, IDOLS, SYMBOL_ART, SYMBOL_NAME, idolFor, money, type GiftId, type Idol } from "@/game/content";
 import {
   playClick,
   playScatter,
@@ -40,7 +40,10 @@ const KEY = "aurora-idol-v1";
 const GAP = 8;
 const EMPTY: boolean[][] = Array.from({ length: REELS }, () => [false, false, false]);
 
+type Encore = { idol: Idol; gift: GiftId; mult: number };
 type Save = { v: 1; balance: number; bet: number; sound: boolean; best: number };
+
+const teaseAt = (idol: Idol, n: number) => idol.tease[n % idol.tease.length] ?? idol.line;
 
 function showcaseStop(strip: Sym[], wanted: Sym): number {
   let fallback = 0;
@@ -166,6 +169,8 @@ function Cabinet() {
   const [cell, setCell] = useState(96);
   const [board, setBoard] = useState({ w: 0, h: 0 });
   const [anticipate, setAnticipate] = useState<boolean[]>(() => Array.from({ length: REELS }, () => false));
+  const [encore, setEncore] = useState<Encore | null>(null);
+  const [picker, setPicker] = useState<{ idol: Idol; spins: number } | null>(null);
   const [reduced, setReduced] = useState(false);
 
   const balanceRef = useRef(save.current.balance);
@@ -182,6 +187,11 @@ function Cabinet() {
   const skipRef = useRef<(() => void) | null>(null);
   const alive = useRef(true);
   const boardRef = useRef<HTMLDivElement>(null);
+  const encoreRef = useRef<Encore | null>(null);
+  const encoreWin = useRef(0);
+  const teaseN = useRef(0);
+  const pickRef = useRef<((gift: GiftId) => void) | null>(null);
+  const needRef = useRef(REELS);
   const shellRef = useRef<HTMLDivElement>(null);
   const trauma = useRef(0);
   const shownRef = useRef(save.current.balance);
@@ -202,6 +212,7 @@ function Cabinet() {
     document.addEventListener("visibilitychange", onVis);
     return () => {
       alive.current = false;
+      pickRef.current?.("near");
       mq.removeEventListener("change", onMotion);
       document.removeEventListener("visibilitychange", onVis);
     };
@@ -229,10 +240,10 @@ function Cabinet() {
   }, [balance]);
 
   useEffect(() => {
-    if (busy) return;
+    if (busy || encore) return;
     const id = window.setInterval(() => setFeature((n) => (n + 1) % IDOLS.length), 7200);
     return () => window.clearInterval(id);
-  }, [busy, feature]);
+  }, [busy, encore, feature]);
 
   useLayoutEffect(() => {
     const el = boardRef.current;
@@ -287,7 +298,7 @@ function Cabinet() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== " " && e.key !== "Enter") return;
-      if (payOpen) return;
+      if (payOpen || picker) return;
       const target = e.target as HTMLElement | null;
       if (target && target.tagName === "BUTTON") return;
       e.preventDefault();
@@ -295,7 +306,7 @@ function Cabinet() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [payOpen]);
+  }, [payOpen, picker]);
 
   const wait = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -336,6 +347,7 @@ function Cabinet() {
       setBest((n) => Math.max(n, ev.total));
       balanceRef.current += ev.total;
       setBalance(balanceRef.current);
+      if (encoreRef.current) encoreWin.current += ev.total;
       const tier = tierFor(ev.total, stake);
       playWin(winLevel(tier));
       const idol = idolFor(ev.best);
@@ -360,18 +372,56 @@ function Cabinet() {
       if (!alive.current) return;
     }
 
-    if (ev.freeSpins) {
-      fsRef.current = Math.min(40, fsRef.current + ev.freeSpins);
-      setFsLeft(fsRef.current);
+    if (ev.freeSpins && !encoreRef.current) {
+      const host = IDOLS.some((entry) => entry.sym === ev.best) ? idolFor(ev.best) : idolFor(IDOLS[feature]?.sym ?? "mika");
       setMask(ev.mask);
       setDim(true);
-      setNote(`${ev.freeSpins} Freispiele · alle Gewinne ×${FS_MULT}`);
-      setBanner({
-        title: "FREISPIELE",
-        detail: `${ev.freeSpins} Drehungen · ×${FS_MULT}`,
-        idol: idolFor("wild"),
+      setPicker({ idol: host, spins: ev.freeSpins });
+      setBurst((n) => n + 1);
+      const giftId = await new Promise<GiftId>((resolve) => {
+        pickRef.current = resolve;
       });
-      await wait(reduced ? 500 : 1200);
+      pickRef.current = null;
+      if (!alive.current) return;
+      const gift = GIFTS.find((entry) => entry.id === giftId) ?? GIFTS[0]!;
+      const spins = Math.min(40, ev.freeSpins + gift.extra);
+      fsRef.current = spins;
+      setFsLeft(spins);
+      const next: Encore = { idol: host, gift: gift.id, mult: gift.mult };
+      encoreRef.current = next;
+      encoreWin.current = 0;
+      teaseN.current = 0;
+      setEncore(next);
+      setPicker(null);
+      const idx = IDOLS.findIndex((entry) => entry.sym === host.sym);
+      if (idx >= 0) setFeature(idx);
+      setNote(`${host.name}: ${gift.line}`);
+      setBanner({
+        title: "PRIVATBÜHNE",
+        detail: gift.line,
+        idol: { ...host, img: host.encore },
+      });
+      await wait(reduced ? 400 : 1100);
+      if (!alive.current) return;
+      setBanner(null);
+    } else if (ev.freeSpins) {
+      fsRef.current = Math.min(40, fsRef.current + ev.freeSpins);
+      setFsLeft(fsRef.current);
+      const host = encoreRef.current?.idol;
+      setNote(host ? `${host.name}: Bleib. Noch ${ev.freeSpins}.` : `${ev.freeSpins} Freispiele`);
+    }
+
+    const closing = encoreRef.current && fsRef.current === 0 ? encoreRef.current : null;
+    const curtain = encoreWin.current;
+    if (closing) {
+      encoreRef.current = null;
+      setEncore(null);
+      setBanner({
+        title: "VORHANG",
+        detail: `${closing.idol.name} · +${money.format(curtain)}`,
+        idol: { ...closing.idol, img: closing.idol.encore },
+      });
+      await wait(reduced ? 400 : 1400);
       if (!alive.current) return;
       setBanner(null);
     }
@@ -394,6 +444,7 @@ function Cabinet() {
     if (phase.current !== "idle") return;
     const stake = betRef.current;
     const inFs = fsRef.current > 0;
+    const featureNow = encoreRef.current;
     if (!inFs && balanceRef.current < stake) {
       setNote("Guthaben leer — Zugabe holen.");
       return;
@@ -410,23 +461,31 @@ function Cabinet() {
     phase.current = "spinning";
     setBusy(true);
     clearBoard();
-    setNote(inFs ? `Freispiel · noch ${fsRef.current}` : "Walzen laufen…");
+    if (inFs && featureNow) setNote(`${featureNow.idol.name}: ${teaseAt(featureNow.idol, teaseN.current++)}`);
+    else setNote("Walzen laufen…");
     const { stops: next, grid } = spinReels();
+    const locked = inFs && featureNow?.gift === "wild";
+    const played = locked ? grid.map((col, i) => (i === 2 ? (["wild", "wild", "wild"] as Sym[]) : col)) : grid;
     finals.current = next;
-    pending.current = evaluate(grid, stake, inFs ? FS_MULT : 1);
-    const scatterReels = grid.flatMap((col, i) => (col.includes("scatter") ? [i] : []));
+    pending.current = evaluate(played, stake, inFs ? (featureNow?.mult ?? FS_MULT) : 1);
+    const scatterReels = played.flatMap((col, i) => (col.includes("scatter") ? [i] : []));
     const after = scatterReels.length >= 2 ? scatterReels[1]! : 99;
-    setAnticipate(grid.map((_, i) => i > after));
+    setAnticipate(grid.map((_, i) => !locked && i > after));
     const token = ++tokenRef.current;
+    needRef.current = locked ? REELS - 1 : REELS;
     doneRef.current = new Set();
     const quick = turboRef.current || reduced;
     setRuns(
-      STRIPS.map((strip, i) => ({
-        id: token,
-        from: stopRef.current[i]!,
-        travel: travelFor(stopRef.current[i]!, next[i]!, strip.length, (quick ? 8 : 16) + i * (quick ? 2 : 4)),
-        duration: (reduced ? 380 : quick ? 560 : 1180) + i * (quick ? 110 : 260) + (i > after ? 700 : 0),
-      })),
+      STRIPS.map((strip, i) =>
+        locked && i === 2
+          ? null
+          : {
+              id: token,
+              from: stopRef.current[i]!,
+              travel: travelFor(stopRef.current[i]!, next[i]!, strip.length, (quick ? 8 : 16) + i * (quick ? 2 : 4)),
+              duration: (reduced ? 380 : quick ? 560 : 1180) + i * (quick ? 110 : 260) + (i > after ? 700 : 0),
+            },
+      ),
     );
   };
   spinRef.current = spin;
@@ -442,14 +501,20 @@ function Cabinet() {
     if (col.includes("scatter")) playScatter();
     else playStop(index);
     bump(0.08);
-    if (doneRef.current.size === REELS && pending.current) {
+    if (doneRef.current.size === needRef.current && pending.current) {
       const ev = pending.current;
       pending.current = null;
       void present(ev, betRef.current);
     }
   };
 
-  const idol = IDOLS[feature] ?? IDOLS[0]!;
+  const chooseGift = (id: GiftId) => {
+    playClick();
+    pickRef.current?.(id);
+  };
+
+  const idol = encore?.idol ?? IDOLS[feature] ?? IDOLS[0]!;
+  const portrait = encore ? idol.encore : idol.img;
   const needsRefill = fsLeft === 0 && balance < bet;
   const active = wins.find((entry) => entry.index === line);
   const marquee = active
@@ -498,7 +563,7 @@ function Cabinet() {
   };
 
   return (
-    <div className="app">
+    <div className={encore ? "app encore" : "app"}>
       <div className="bg" />
       <ParticleField burst={burst} />
       <div className="shell" ref={shellRef}>
@@ -524,8 +589,8 @@ function Cabinet() {
 
         <div className="layout">
           <aside className="hero">
-            <button type="button" className="portrait" onClick={() => setFeature((n) => (n + 1) % IDOLS.length)}>
-              <img src={idol.img} alt={idol.name} />
+            <button type="button" className="portrait" onClick={() => setFeature((n) => (n + 1) % IDOLS.length)} disabled={!!encore}>
+              <img src={portrait} alt={idol.name} />
             </button>
             <div className="hero-copy">
               <p className="kicker">{idol.role}</p>
@@ -550,6 +615,7 @@ function Cabinet() {
                   dim={dim}
                   anticipate={!!anticipate[i]}
                   reduced={reduced}
+                  hold={!!encore && encore.gift === "wild" && (fsLeft > 0 || busy)}
                   onDone={(id) => onReelDone(i, id)}
                 />
               ))}
@@ -562,7 +628,8 @@ function Cabinet() {
             <div className="status">
               {fsLeft > 0 ? (
                 <b>
-                  Freispiele {fsLeft} · ×{FS_MULT}
+                  {encore ? `${encore.idol.name} · ` : ""}
+                  Privatbühne {fsLeft} · ×{encore?.mult ?? FS_MULT}
                 </b>
               ) : (
                 <span>Letzter Gewinn {money.format(lastWin)}</span>
@@ -615,6 +682,25 @@ function Cabinet() {
         <p className="fine dock">Nur Spielgeld. Keine Auszahlung. Kein Glücksspiel um Echtgeld.</p>
       </div>
 
+      {picker ? (
+        <div className="stage" role="dialog" aria-modal="true" aria-label="Privatbühne">
+          <p className="kicker">Privatbühne · {picker.spins} Drehungen</p>
+          <img className="stage-hero" src={picker.idol.encore} alt="" />
+          <div className="stage-copy">
+            <h2>{picker.idol.name}</h2>
+            <p>{picker.idol.line}</p>
+          </div>
+          <div className="stage-picks">
+            {GIFTS.map((gift) => (
+              <button key={gift.id} type="button" onClick={() => chooseGift(gift.id)}>
+                <strong>{gift.title}</strong>
+                <span>{gift.line}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {banner ? (
         <div className="banner" role="dialog" aria-label={banner.title}>
           <img src={banner.idol.img} alt="" />
@@ -637,7 +723,7 @@ function Cabinet() {
             </header>
             <p>
               {LINE_COUNT} Linien, Einsatz {money.format(bet)}. Drei oder mehr gleiche Symbole von links. Luna (Wild) ersetzt
-              alles außer Zugabe. Drei Zugaben starten Freispiele, Gewinne darin ×{FS_MULT}.
+              alles außer Zugabe. Drei Zugaben öffnen die Privatbühne: du wählst Näher (×3), Länger (+6) oder Luna in der Mitte.
             </p>
             <ul>
               {SYMBOLS.filter((sym) => sym !== "scatter").map((sym) => (

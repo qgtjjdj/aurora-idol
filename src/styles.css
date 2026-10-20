@@ -287,6 +287,90 @@
   animation: land 220ms ease-out;
 }
 
+.reel.locked {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 18px color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+.app.encore .board {
+  box-shadow: 0 0 28px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.app.encore .bg {
+  filter: saturate(1.25) brightness(0.72);
+}
+
+.stage {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: max(0.8rem, env(safe-area-inset-top)) 1rem calc(0.8rem + env(safe-area-inset-bottom));
+  background:
+    radial-gradient(ellipse at 50% 16%, color-mix(in srgb, var(--color-accent) 50%, transparent), transparent 46%),
+    color-mix(in srgb, var(--color-bg) 90%, black);
+  overflow: auto;
+}
+
+.stage-hero {
+  width: min(42vw, 11rem);
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  object-position: center 12%;
+  border-radius: 1rem;
+  border: 1px solid var(--color-primary);
+  box-shadow: 0 0 42px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+.stage-copy {
+  text-align: center;
+}
+
+.stage-copy h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+}
+
+.stage-copy p {
+  margin: 0.15rem 0 0;
+}
+
+.stage-picks {
+  width: min(28rem, 100%);
+  display: grid;
+  gap: 0.45rem;
+  margin-top: auto;
+}
+
+.stage-picks button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  text-align: left;
+  border-radius: 0.9rem;
+  border: 1px solid var(--color-primary);
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  color: var(--color-fg);
+  padding: 0.65rem 0.85rem;
+}
+
+.stage-picks strong {
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+.stage-picks span {
+  color: var(--color-muted);
+  font-size: 0.82rem;
+}
+
 @keyframes land {
   from {
     transform: scaleY(1.04);
