@@ -238,8 +238,11 @@ function Cabinet() {
     const el = boardRef.current;
     if (!el) return;
     const measure = () => {
-      setCell(el.clientHeight / 3);
-      setBoard({ w: el.clientWidth, h: el.clientHeight });
+      const h = el.clientHeight;
+      const w = el.clientWidth;
+      const next = h / 3;
+      setCell((prev) => (Math.abs(prev - next) < 0.5 ? prev : next));
+      setBoard((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
     };
     measure();
     const ro = new ResizeObserver(measure);
