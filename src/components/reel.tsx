@@ -32,6 +32,7 @@ export function Reel({
   anticipate,
   reduced,
   hold,
+  faces,
   onDone,
 }: {
   strip: Sym[];
@@ -43,6 +44,7 @@ export function Reel({
   anticipate: boolean;
   reduced: boolean;
   hold?: boolean;
+  faces?: Sym[] | null;
   onDone: (id: number) => void;
 }) {
   const stripRef = useRef<HTMLDivElement>(null);
@@ -118,6 +120,23 @@ export function Reel({
               <SymbolFace sym="wild" />
             </div>
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!spinning && faces && faces.length >= 3) {
+    return (
+      <div className="reel">
+        <div className="strip" style={{ height: cell * 3 }}>
+          {faces.slice(0, 3).map((sym, row) => {
+            const win = !!wins[row];
+            return (
+              <div key={`${sym}-${row}`} className={`cell ${win ? "win" : ""} ${dim && !win ? "dim" : ""}`} style={{ height: cell || undefined }}>
+                <SymbolFace sym={sym} />
+              </div>
+            );
+          })}
         </div>
       </div>
     );

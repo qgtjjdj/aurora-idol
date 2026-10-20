@@ -3,6 +3,7 @@ import { Info, Minus, Plus, Volume2, VolumeX, Zap } from "lucide-react";
 import { ParticleField } from "@/components/particle-field";
 import { Reel, type ReelRun } from "@/components/reel";
 import { GIFTS, IDOLS, SYMBOL_ART, SYMBOL_NAME, idolFor, money, type GiftId, type Idol } from "@/game/content";
+import { MACHINES, machineById, type Machine, type MachineId } from "@/game/machines";
 import {
   playClick,
   playScatter,
@@ -40,7 +41,9 @@ const KEY = "aurora-idol-v1";
 const GAP = 8;
 const EMPTY: boolean[][] = Array.from({ length: REELS }, () => [false, false, false]);
 
-type Encore = { idol: Idol; gift: GiftId; mult: number };
+type Feat =
+  | { kind: "privat"; idol: Idol; gift: GiftId; mult: number }
+  | { kind: "climb" | "expand" | "mirror"; idol: Idol; mult: number };
 type Save = { v: 1; balance: number; bet: number; sound: boolean; best: number };
 
 const teaseAt = (idol: Idol, n: number) => idol.tease[n % idol.tease.length] ?? idol.line;
@@ -93,6 +96,7 @@ function winLevel(tier: Tier): 1 | 2 | 3 | 4 {
 
 export function AuroraIdol() {
   const [entered, setEntered] = useState(false);
+  const [machine, setMachine] = useState<MachineId | null>(null);
   if (!entered) {
     return (
       <Intro
@@ -104,7 +108,8 @@ export function AuroraIdol() {
       />
     );
   }
-  return <Cabinet />;
+  if (!machine) return <Hall onPick={setMachine} />;
+  return <Cabinet key={machine} machine={machineById(machine)} onLeave={() => setMachine(null)} />;
 }
 
 function Intro({ onEnter }: { onEnter: () => void }) {
@@ -118,7 +123,7 @@ function Intro({ onEnter }: { onEnter: () => void }) {
           <span>Aurora</span>
           <span>Idol</span>
         </h1>
-        <p className="lede">Fünf Walzen. Vier Idols. Eine Bühne, die nur für dich leuchtet.</p>
+        <p className="lede">Vier Automaten, ein Guthaben. Jede Bühne zahlt anders.</p>
         <div className="cast">
           {IDOLS.slice(0, 4).map((idol) => (
             <figure key={idol.sym}>
@@ -136,7 +141,35 @@ function Intro({ onEnter }: { onEnter: () => void }) {
   );
 }
 
-function Cabinet() {
+function Hall({ onPick }: { onPick: (id: MachineId) => void }) {
+  return (
+    <div className="app">
+      <div className="bg" />
+      <main className="hall">
+        <p className="kicker">Spielhalle</p>
+        <h1>Wähl eine Bühne</h1>
+        <div className="hall-grid">
+          {MACHINES.map((machine) => {
+            const host = idolFor(machine.host);
+            return (
+              <button key={machine.id} type="button" className="hall-card" onClick={() => onPick(machine.id)}>
+                <img src={host.encore} alt="" />
+                <span>
+                  <em className="kicker">{machine.kicker}</em>
+                  <strong>{machine.name}</strong>
+                  <small>{machine.bonus}</small>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="fine">Ein Guthaben für alle Automaten. Nur Spielgeld.</p>
+      </main>
+    </div>
+  );
+}
+
+function Cabinet({ machine, onLeave }: { machine: Machine; onLeave: () => void }) {
   const save = useRef(loadSave());
   const initialStops = [
     showcaseStop(STRIPS[0]!, "mika"),
@@ -158,8 +191,8 @@ function Cabinet() {
   const [auto, setAuto] = useState(false);
   const [turbo, setTurbo] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [feature, setFeature] = useState(0);
-  const [note, setNote] = useState("20 Linien · tippe auf Drehen");
+  const [feature, setFeature] = useState(() => Math.max(0, IDOLS.findIndex((idol) => idol.sym === machine.host)));
+  const [note, setNote] = useState(machine.bonus);
   const [lastWin, setLastWin] = useState(0);
   const [line, setLine] = useState<number | null>(null);
   const [wins, setWins] = useState<Evaluation["lines"]>([]);
@@ -169,8 +202,9 @@ function Cabinet() {
   const [cell, setCell] = useState(96);
   const [board, setBoard] = useState({ w: 0, h: 0 });
   const [anticipate, setAnticipate] = useState<boolean[]>(() => Array.from({ length: REELS }, () => false));
-  const [encore, setEncore] = useState<Encore | null>(null);
+  const [encore, setEncore] = useState<Feat | null>(null);
   const [picker, setPicker] = useState<{ idol: Idol; spins: number } | null>(null);
+  const [faces, setFaces] = useState<Sym[][] | null>(null);
   const [reduced, setReduced] = useState(false);
 
   const balanceRef = useRef(save.current.balance);
@@ -187,11 +221,12 @@ function Cabinet() {
   const skipRef = useRef<(() => void) | null>(null);
   const alive = useRef(true);
   const boardRef = useRef<HTMLDivElement>(null);
-  const encoreRef = useRef<Encore | null>(null);
+  const encoreRef = useRef<Feat | null>(null);
   const encoreWin = useRef(0);
   const teaseN = useRef(0);
   const pickRef = useRef<((gift: GiftId) => void) | null>(null);
   const needRef = useRef(REELS);
+  const facesRef = useRef<Sym[][] | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const trauma = useRef(0);
   const shownRef = useRef(save.current.balance);
@@ -330,6 +365,7 @@ function Cabinet() {
     setWins([]);
     setLine(null);
     setAnticipate(Array.from({ length: REELS }, () => false));
+    setFaces(null);
   };
 
   const present = async (ev: Evaluation, stake: number) => {
@@ -372,35 +408,58 @@ function Cabinet() {
       if (!alive.current) return;
     }
 
+    if (encoreRef.current?.kind === "climb") {
+      const mult = ev.total > 0 ? Math.min(8, encoreRef.current.mult + 1) : 2;
+      const next = { ...encoreRef.current, mult };
+      encoreRef.current = next;
+      setEncore(next);
+    }
+
     if (ev.freeSpins && !encoreRef.current) {
-      const host = IDOLS.some((entry) => entry.sym === ev.best) ? idolFor(ev.best) : idolFor(IDOLS[feature]?.sym ?? "mika");
+      const host = machine.kind === "privat"
+        ? IDOLS.some((entry) => entry.sym === ev.best)
+          ? idolFor(ev.best)
+          : idolFor(IDOLS[feature]?.sym ?? machine.host)
+        : idolFor(machine.host);
       setMask(ev.mask);
       setDim(true);
-      setPicker({ idol: host, spins: ev.freeSpins });
       setBurst((n) => n + 1);
-      const giftId = await new Promise<GiftId>((resolve) => {
-        pickRef.current = resolve;
-      });
-      pickRef.current = null;
-      if (!alive.current) return;
-      const gift = GIFTS.find((entry) => entry.id === giftId) ?? GIFTS[0]!;
-      const spins = Math.min(40, ev.freeSpins + gift.extra);
-      fsRef.current = spins;
-      setFsLeft(spins);
-      const next: Encore = { idol: host, gift: gift.id, mult: gift.mult };
-      encoreRef.current = next;
-      encoreWin.current = 0;
-      teaseN.current = 0;
-      setEncore(next);
-      setPicker(null);
-      const idx = IDOLS.findIndex((entry) => entry.sym === host.sym);
-      if (idx >= 0) setFeature(idx);
-      setNote(`${host.name}: ${gift.line}`);
-      setBanner({
-        title: "PRIVATBÜHNE",
-        detail: gift.line,
-        idol: { ...host, img: host.encore },
-      });
+      if (machine.kind === "privat") {
+        setPicker({ idol: host, spins: ev.freeSpins });
+        const giftId = await new Promise<GiftId>((resolve) => {
+          pickRef.current = resolve;
+        });
+        pickRef.current = null;
+        if (!alive.current) return;
+        const gift = GIFTS.find((entry) => entry.id === giftId) ?? GIFTS[0]!;
+        const spins = Math.min(40, ev.freeSpins + gift.extra);
+        fsRef.current = spins;
+        setFsLeft(spins);
+        const next: Feat = { kind: "privat", idol: host, gift: gift.id, mult: gift.mult };
+        encoreRef.current = next;
+        encoreWin.current = 0;
+        teaseN.current = 0;
+        setEncore(next);
+        setPicker(null);
+        const idx = IDOLS.findIndex((entry) => entry.sym === host.sym);
+        if (idx >= 0) setFeature(idx);
+        setNote(`${host.name}: ${gift.line}`);
+        setBanner({ title: "PRIVATBÜHNE", detail: gift.line, idol: { ...host, img: host.encore } });
+      } else {
+        const spins = Math.min(40, ev.freeSpins);
+        fsRef.current = spins;
+        setFsLeft(spins);
+        const title = machine.kind === "climb" ? "KETTENLICHT" : machine.kind === "expand" ? "VOLLMOND" : "DUETT";
+        const next: Feat = { kind: machine.kind, idol: host, mult: 2 };
+        encoreRef.current = next;
+        encoreWin.current = 0;
+        teaseN.current = 0;
+        setEncore(next);
+        const idx = IDOLS.findIndex((entry) => entry.sym === host.sym);
+        if (idx >= 0) setFeature(idx);
+        setNote(`${host.name}: ${machine.bonus}`);
+        setBanner({ title, detail: machine.bonus, idol: { ...host, img: host.encore } });
+      }
       await wait(reduced ? 400 : 1100);
       if (!alive.current) return;
       setBanner(null);
@@ -417,7 +476,7 @@ function Cabinet() {
       encoreRef.current = null;
       setEncore(null);
       setBanner({
-        title: "VORHANG",
+        title: closing.kind === "climb" ? "KETTE AUS" : closing.kind === "expand" ? "MOND UNTER" : closing.kind === "mirror" ? "DUETT AUS" : "VORHANG",
         detail: `${closing.idol.name} · +${money.format(curtain)}`,
         idol: { ...closing.idol, img: closing.idol.encore },
       });
@@ -464,8 +523,17 @@ function Cabinet() {
     if (inFs && featureNow) setNote(`${featureNow.idol.name}: ${teaseAt(featureNow.idol, teaseN.current++)}`);
     else setNote("Walzen laufen…");
     const { stops: next, grid } = spinReels();
-    const locked = inFs && featureNow?.gift === "wild";
-    const played = locked ? grid.map((col, i) => (i === 2 ? (["wild", "wild", "wild"] as Sym[]) : col)) : grid;
+    const locked = !!featureNow && featureNow.kind === "privat" && featureNow.gift === "wild";
+    let played = grid.map((col) => col.slice());
+    if (inFs && locked) played[2] = ["wild", "wild", "wild"];
+    if (inFs && featureNow?.kind === "expand") {
+      played = played.map((col) => (col.includes("wild") ? (["wild", "wild", "wild"] as Sym[]) : col));
+    }
+    if (inFs && featureNow?.kind === "mirror") {
+      played[3] = played[1]!.slice();
+      played[4] = played[0]!.slice();
+    }
+    facesRef.current = inFs && featureNow && (featureNow.kind === "expand" || featureNow.kind === "mirror") ? played : null;
     finals.current = next;
     pending.current = evaluate(played, stake, inFs ? (featureNow?.mult ?? FS_MULT) : 1);
     const scatterReels = played.flatMap((col, i) => (col.includes("scatter") ? [i] : []));
@@ -502,6 +570,7 @@ function Cabinet() {
     else playStop(index);
     bump(0.08);
     if (doneRef.current.size === needRef.current && pending.current) {
+      if (facesRef.current) setFaces(facesRef.current);
       const ev = pending.current;
       pending.current = null;
       void present(ev, betRef.current);
@@ -568,9 +637,12 @@ function Cabinet() {
       <ParticleField burst={burst} />
       <div className="shell" ref={shellRef}>
         <header className="top">
+          <button type="button" className="hall-back" onClick={onLeave} disabled={busy || fsLeft > 0}>
+            Halle
+          </button>
           <div className="brand">
-            <span className="kicker">Neon Reels</span>
-            <strong>Aurora Idol</strong>
+            <span className="kicker">{machine.kicker}</span>
+            <strong>{machine.name}</strong>
           </div>
           <div className="meters">
             <span>
@@ -615,7 +687,8 @@ function Cabinet() {
                   dim={dim}
                   anticipate={!!anticipate[i]}
                   reduced={reduced}
-                  hold={i === 2 && !!encore && encore.gift === "wild" && (fsLeft > 0 || busy)}
+                  hold={i === 2 && encore?.kind === "privat" && encore.gift === "wild" && (fsLeft > 0 || busy)}
+                  faces={faces?.[i] ?? null}
                   onDone={(id) => onReelDone(i, id)}
                 />
               ))}
@@ -629,7 +702,7 @@ function Cabinet() {
               {fsLeft > 0 ? (
                 <b>
                   {encore ? `${encore.idol.name} · ` : ""}
-                  Privatbühne {fsLeft} · ×{encore?.mult ?? FS_MULT}
+                  {machine.name} {fsLeft} · ×{encore?.mult ?? FS_MULT}
                 </b>
               ) : (
                 <span>Letzter Gewinn {money.format(lastWin)}</span>
@@ -723,7 +796,7 @@ function Cabinet() {
             </header>
             <p>
               {LINE_COUNT} Linien, Einsatz {money.format(bet)}. Drei oder mehr gleiche Symbole von links. Luna (Wild) ersetzt
-              alles außer Zugabe. Drei Zugaben öffnen die Privatbühne: du wählst Näher (×3), Länger (+6) oder Luna in der Mitte.
+              alles außer Zugabe. {machine.rules}
             </p>
             <ul>
               {SYMBOLS.filter((sym) => sym !== "scatter").map((sym) => (
