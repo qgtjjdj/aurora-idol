@@ -615,7 +615,7 @@ function Cabinet() {
                   dim={dim}
                   anticipate={!!anticipate[i]}
                   reduced={reduced}
-                  hold={!!encore && encore.gift === "wild" && (fsLeft > 0 || busy)}
+                  hold={i === 2 && !!encore && encore.gift === "wild" && (fsLeft > 0 || busy)}
                   onDone={(id) => onReelDone(i, id)}
                 />
               ))}
