@@ -5,3 +5,8 @@ screenshots/
 artifacts/
 .tanstack/
 *.log
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
